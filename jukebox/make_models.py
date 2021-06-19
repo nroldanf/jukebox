@@ -91,6 +91,13 @@ def make_vqvae(hps, device='cuda'):
                   multipliers=hps.hvqvae_multipliers, use_bottleneck=hps.use_bottleneck,
                   **block_kwargs)
 
+    # DISTRIBUTED DATA PARALLELISM STRATEGY
+    if t.cuda.device_count() > 1:
+        print("Let's use", t.cuda.device_count(), "GPUs!")
+        vqvae = t.nn.DataParallel(vqvae)
+    else:
+        print("Only {} GPU!".format(t.cuda.device_count()))
+    # ****************************
     vqvae = vqvae.to(device)
     restore_model(hps, vqvae, hps.restore_vqvae)
     if hps.train and not hps.prior:
@@ -175,6 +182,14 @@ def make_prior(hps, vqvae, device='cuda'):
         print_all("Converting to fp16 params")
         from jukebox.transformer.ops import _convert_conv_weights_to_fp16
         prior.apply(_convert_conv_weights_to_fp16)
+
+    # DISTRIBUTUON STRATEGY DATA PARALLELISM
+    if t.cuda.device_count() > 1:
+        print("Let's use", t.cuda.device_count(), "GPUs!")
+        # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
+        prior = t.nn.DataParallel(prior)
+    # ********************************
+    
     prior = prior.to(device)
     restore_model(hps, prior, hps.restore_prior)
     if hps.train:
