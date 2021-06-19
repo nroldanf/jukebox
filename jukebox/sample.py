@@ -8,10 +8,11 @@ from jukebox.utils.torch_utils import empty_cache
 from jukebox.utils.audio_utils import save_wav, load_audio
 from jukebox.make_models import make_model
 from jukebox.align import get_alignment
-from jukebox.save_html import save_html
+# from jukebox.save_html import save_html
 from jukebox.utils.sample_utils import split_batch, get_starts
 from jukebox.utils.dist_utils import print_once
 import fire
+
 
 # Sample a partial window of length<n_ctx with tokens_to_sample new tokens on level=level
 def sample_partial_window(zs, labels, sampling_kwargs, level, prior, tokens_to_sample, hps):
@@ -27,6 +28,7 @@ def sample_partial_window(zs, labels, sampling_kwargs, level, prior, tokens_to_s
 
     return sample_single_window(zs, labels, sampling_kwargs, level, prior, start, hps)
 
+
 # Sample a single window of length=n_ctx at position=start on level=level
 def sample_single_window(zs, labels, sampling_kwargs, level, prior, start, hps):
     n_samples = hps.n_samples
@@ -34,7 +36,7 @@ def sample_single_window(zs, labels, sampling_kwargs, level, prior, start, hps):
     end = start + n_ctx
 
     # get z already sampled at current level
-    z = zs[level][:,start:end]
+    z = zs[level][:, start:end]
 
     if 'sample_tokens' in sampling_kwargs:
         # Support sampling a window shorter than n_ctx
@@ -43,12 +45,14 @@ def sample_single_window(zs, labels, sampling_kwargs, level, prior, start, hps):
         sample_tokens = (end - start)
     conditioning_tokens, new_tokens = z.shape[1], sample_tokens - z.shape[1]
 
-    print_once(f"Sampling {sample_tokens} tokens for [{start},{start+sample_tokens}]. Conditioning on {conditioning_tokens} tokens")
+    print(sample_tokens, start, conditioning_tokens)
+    print_once(
+        f"Sampling {sample_tokens} tokens for [{start},{start + sample_tokens}]. Conditioning on {conditioning_tokens} tokens")
 
     if new_tokens <= 0:
         # Nothing new to sample
         return zs
-    
+
     # get z_conds from level above
     z_conds = prior.get_z_conds(zs, start, end)
 
@@ -59,7 +63,6 @@ def sample_single_window(zs, labels, sampling_kwargs, level, prior, start, hps):
 
     max_batch_size = sampling_kwargs['max_batch_size']
     del sampling_kwargs['max_batch_size']
-
 
     z_list = split_batch(z, n_samples, max_batch_size)
     z_conds_list = split_batch(z_conds, n_samples, max_batch_size)
@@ -73,9 +76,10 @@ def sample_single_window(zs, labels, sampling_kwargs, level, prior, start, hps):
     sampling_kwargs['max_batch_size'] = max_batch_size
 
     # Update z with new sample
-    z_new = z[:,-new_tokens:]
+    z_new = z[:, -new_tokens:]
     zs[level] = t.cat([zs[level], z_new], dim=1)
     return zs
+
 
 # Sample total_length tokens at level=level with hop_length=hop_length
 def sample_level(zs, labels, sampling_kwargs, level, prior, total_length, hop_length, hps):
@@ -87,6 +91,7 @@ def sample_level(zs, labels, sampling_kwargs, level, prior, total_length, hop_le
         zs = sample_partial_window(zs, labels, sampling_kwargs, level, prior, total_length, hps)
     return zs
 
+
 # Sample multiple levels
 def _sample(zs, labels, sampling_kwargs, priors, sample_levels, hps):
     alignments = None
@@ -97,8 +102,8 @@ def _sample(zs, labels, sampling_kwargs, priors, sample_levels, hps):
 
         # Set correct total_length, hop_length, labels and sampling_kwargs for level
         assert hps.sample_length % prior.raw_to_tokens == 0, f"Expected sample_length {hps.sample_length} to be multiple of {prior.raw_to_tokens}"
-        total_length = hps.sample_length//prior.raw_to_tokens
-        hop_length = int(hps.hop_fraction[level]*prior.n_ctx)
+        total_length = hps.sample_length // prior.raw_to_tokens
+        hop_length = int(hps.hop_fraction[level] * prior.n_ctx)
         zs = sample_level(zs, labels[level], sampling_kwargs[level], level, prior, total_length, hop_length, hps)
 
         prior.cpu()
@@ -115,17 +120,20 @@ def _sample(zs, labels, sampling_kwargs, priors, sample_levels, hps):
             os.makedirs(logdir)
         t.save(dict(zs=zs, labels=labels, sampling_kwargs=sampling_kwargs, x=x), f"{logdir}/data.pth.tar")
         save_wav(logdir, x, hps.sr)
-        if alignments is None and priors[-1] is not None and priors[-1].n_tokens > 0 and not isinstance(priors[-1].labeller, EmptyLabeller):
+        if alignments is None and priors[-1] is not None and priors[-1].n_tokens > 0 and not isinstance(
+                priors[-1].labeller, EmptyLabeller):
             alignments = get_alignment(x, zs, labels[-1], priors[-1], sampling_kwargs[-1]['fp16'], hps)
-        save_html(logdir, x, zs, labels[-1], alignments, hps)
+        # save_html(logdir, x, zs, labels[-1], alignments, hps)
     return zs
+
 
 # Generate ancestral samples given a list of artists and genres
 def ancestral_sample(labels, sampling_kwargs, priors, hps):
     sample_levels = list(range(len(priors)))
-    zs = [t.zeros(hps.n_samples,0,dtype=t.long, device='cuda') for _ in range(len(priors))]
+    zs = [t.zeros(hps.n_samples, 0, dtype=t.long, device='cuda') for _ in range(len(priors))]
     zs = _sample(zs, labels, sampling_kwargs, priors, sample_levels, hps)
     return zs
+
 
 # Continue ancestral sampling from previously saved codes
 def continue_sample(zs, labels, sampling_kwargs, priors, hps):
@@ -133,11 +141,13 @@ def continue_sample(zs, labels, sampling_kwargs, priors, hps):
     zs = _sample(zs, labels, sampling_kwargs, priors, sample_levels, hps)
     return zs
 
+
 # Upsample given already generated upper-level codes
 def upsample(zs, labels, sampling_kwargs, priors, hps):
     sample_levels = list(range(len(priors) - 1))
     zs = _sample(zs, labels, sampling_kwargs, priors, sample_levels, hps)
     return zs
+
 
 # Prompt the model with raw audio input (dimension: NTC) and generate continuations
 def primed_sample(x, labels, sampling_kwargs, priors, hps):
@@ -146,12 +156,13 @@ def primed_sample(x, labels, sampling_kwargs, priors, hps):
     zs = _sample(zs, labels, sampling_kwargs, priors, sample_levels, hps)
     return zs
 
+
 # Load `duration` seconds of the given audio files to use as prompts
 def load_prompts(audio_files, duration, hps):
     xs = []
     for audio_file in audio_files:
         x = load_audio(audio_file, sr=hps.sr, duration=duration, offset=0.0, mono=True)
-        x = x.T # CT -> TC
+        x = x.T  # CT -> TC
         xs.append(x)
     while len(xs) < hps.n_samples:
         xs.extend(xs)
@@ -159,6 +170,7 @@ def load_prompts(audio_files, duration, hps):
     x = t.stack([t.from_numpy(x) for x in xs])
     x = x.to('cuda', non_blocking=True)
     return x
+
 
 # Load codes from previous sampling run
 def load_codes(codes_file, duration, priors, hps):
@@ -170,9 +182,11 @@ def load_codes(codes_file, duration, priors, hps):
         # Cut off codes to match duration
         top_raw_to_tokens = priors[-1].raw_to_tokens
         assert duration % top_raw_to_tokens == 0, f"Cut-off duration {duration} not an exact multiple of top_raw_to_tokens"
-        assert duration//top_raw_to_tokens <= zs[-1].shape[1], f"Cut-off tokens {duration//priors[-1].raw_to_tokens} longer than tokens {zs[-1].shape[1]} in saved codes"
-        zs = [z[:,:duration//prior.raw_to_tokens] for z, prior in zip(zs, priors)]
+        assert duration // top_raw_to_tokens <= zs[-1].shape[
+            1], f"Cut-off tokens {duration // priors[-1].raw_to_tokens} longer than tokens {zs[-1].shape[1]} in saved codes"
+        zs = [z[:, :duration // prior.raw_to_tokens] for z, prior in zip(zs, priors)]
     return zs
+
 
 # Generate and save samples, alignment, and webpage for visualization.
 def save_samples(model, device, hps, sample_hps):
@@ -180,7 +194,8 @@ def save_samples(model, device, hps, sample_hps):
     from jukebox.lyricdict import poems, gpt_2_lyrics
     vqvae, priors = make_model(model, device, hps)
 
-    assert hps.sample_length//priors[-2].raw_to_tokens >= priors[-2].n_ctx, f"Upsampling needs atleast one ctx in get_z_conds. Please choose a longer sample length"
+    assert hps.sample_length // priors[-2].raw_to_tokens >= priors[
+        -2].n_ctx, f"Upsampling needs atleast one ctx in get_z_conds. Please choose a longer sample length"
 
     total_length = hps.total_sample_length_in_seconds * hps.sr
     offset = 0
@@ -189,9 +204,9 @@ def save_samples(model, device, hps, sample_hps):
     # We used different label sets in our models, but you can write the human friendly names here and we'll map them under the hood for each model.
     # For the 5b/5b_lyrics model and the upsamplers, labeller will look up artist and genres in v2 set. (after lowercasing, removing non-alphanumerics and collapsing whitespaces to _).
     # For the 1b_lyrics top level, labeller will look up artist and genres in v3 set (after lowercasing).
-    metas = [dict(artist = "Alan Jackson",
-                  genre = "Country",
-                  lyrics = poems['ozymandias'],
+    metas = [dict(artist="Alan Jackson",
+                  genre="Country",
+                  lyrics=poems['ozymandias'],
                   total_length=total_length,
                   offset=offset,
                   ),
@@ -236,9 +251,10 @@ def save_samples(model, device, hps, sample_hps):
     else:
         chunk_size = 16
         max_batch_size = 3
-    sampling_kwargs = [dict(temp=0.99, fp16=True, chunk_size=lower_level_chunk_size, max_batch_size=lower_level_max_batch_size),
-                       dict(temp=0.99, fp16=True, chunk_size=lower_level_chunk_size, max_batch_size=lower_level_max_batch_size),
-                       dict(temp=0.99, fp16=True, chunk_size=chunk_size, max_batch_size=max_batch_size)]
+    sampling_kwargs = [
+        dict(temp=0.99, fp16=True, chunk_size=lower_level_chunk_size, max_batch_size=lower_level_max_batch_size),
+        dict(temp=0.99, fp16=True, chunk_size=lower_level_chunk_size, max_batch_size=lower_level_max_batch_size),
+        dict(temp=0.99, fp16=True, chunk_size=chunk_size, max_batch_size=max_batch_size)]
 
     if sample_hps.mode == 'ancestral':
         ancestral_sample(labels, sampling_kwargs, priors, hps)
@@ -270,10 +286,12 @@ def run(model, mode='ancestral', codes_file=None, audio_file=None, prompt_length
     from jukebox.utils.dist_utils import setup_dist_from_mpi
     rank, local_rank, device = setup_dist_from_mpi(port=port)
     hps = Hyperparams(**kwargs)
-    sample_hps = Hyperparams(dict(mode=mode, codes_file=codes_file, audio_file=audio_file, prompt_length_in_seconds=prompt_length_in_seconds))
+    sample_hps = Hyperparams(dict(mode=mode, codes_file=codes_file, audio_file=audio_file,
+                                  prompt_length_in_seconds=prompt_length_in_seconds))
 
     with t.no_grad():
         save_samples(model, device, hps, sample_hps)
+
 
 if __name__ == '__main__':
     fire.Fire(run)

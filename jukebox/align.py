@@ -95,7 +95,7 @@ def save_alignment(model, device, hps):
 
     data['alignments'] = get_alignment(data['x'], data['zs'], data['labels'][-1], priors[-1], fp16, hps)
     t.save(data, f"{logdir}/data_align.pth.tar")
-    save_html(logdir, data['x'], data['zs'], data['labels'][-1], data['alignments'], hps)
+    # save_html(logdir, data['x'], data['zs'], data['labels'][-1], data['alignments'], hps)
 
 def run(model, port=29500, **kwargs):
     from jukebox.utils.dist_utils import setup_dist_from_mpi
