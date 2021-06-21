@@ -5,6 +5,7 @@ Test on dummy outputs to see if everything matches
 """
 import os
 import numpy as np
+from collections import OrderedDict
 import torch as t
 import jukebox.utils.dist_adapter as dist
 from jukebox.hparams import Hyperparams, setup_hparams, REMOTE_PREFIX
@@ -20,6 +21,8 @@ MODELS = {
     '1b_lyrics': ("vqvae", "upsampler_level_0", "upsampler_level_1", "prior_1b_lyrics"),
     #'your_model': ("you_vqvae_here", "your_upsampler_here", ..., "you_top_level_prior_here")
 }
+
+# MINE: https://pytorch.org/tutorials/intermediate/ddp_tutorial.html#save-and-load-checkpoints
 
 def load_checkpoint(path):
     restore = path
@@ -57,7 +60,18 @@ def restore_model(hps, model, checkpoint_path):
         # for k in set(checkpoint_hps.keys()).union(set(hps.keys())):
         #     if checkpoint_hps.get(k, None) != hps.get(k, None):
         #         print(k, "Checkpoint:", checkpoint_hps.get(k, None), "Ours:", hps.get(k, None))
+        
+        # ADD THIS FOR TESTING (MINE)
+        new_state_dict = OrderedDict()
+        for k, v in checkpoint["model"].items():
+            name = k[7:]
+            new_state_dict[name] = v
+
+        print("STATE DICT CHECKPOINT MODEL IDEAL: ", new_state_dict)
+        # ****************
+
         checkpoint['model'] = {k[7:] if k[:7] == 'module.' else k: v for k, v in checkpoint['model'].items()}
+        print("STATE DICT CHECKPOINT MODEL: ", checkpoint["model"])
         model.load_state_dict(checkpoint['model'])
         if 'step' in checkpoint: model.step = checkpoint['step']
 
@@ -91,16 +105,18 @@ def make_vqvae(hps, device='cuda'):
                   multipliers=hps.hvqvae_multipliers, use_bottleneck=hps.use_bottleneck,
                   **block_kwargs)
 
-    # DISTRIBUTED DATA PARALLELISM STRATEGY
-    if t.cuda.device_count() > 1:
-        print("Let's use", t.cuda.device_count(), "GPUs!")
-        vqvae = t.nn.DataParallel(vqvae)
-    else:
-        print("Only {} GPU!".format(t.cuda.device_count()))
+    # # DISTRIBUTED DATA PARALLELISM STRATEGY
+    # if t.cuda.device_count() > 1:
+    #     print("Let's use", t.cuda.device_count(), "GPUs!")
+    #     vqvae = t.nn.DataParallel(vqvae)
+    # else:
+    #     print("Only {} GPU!".format(t.cuda.device_count()))
     # ****************************
     vqvae = vqvae.to(device)
     restore_model(hps, vqvae, hps.restore_vqvae)
+
     if hps.train and not hps.prior:
+        print("VQVAE LOADING IN TRAIN MODE")
         print_all(f"Loading vqvae in train mode")
         if hps.restore_vqvae != '':
             print_all("Reseting bottleneck emas")
@@ -111,6 +127,7 @@ def make_vqvae(hps, device='cuda'):
                 num_tokens = (num_samples // raw_to_tokens) * dist.get_world_size()
                 bottleneck.restore_k(num_tokens=num_tokens, threshold=hps.revival_threshold)
     else:
+        print("VQVAE LOADING IN EVAL MODE")
         print_all(f"Loading vqvae in eval mode")
         vqvae.eval()
         freeze_model(vqvae)
@@ -184,18 +201,20 @@ def make_prior(hps, vqvae, device='cuda'):
         prior.apply(_convert_conv_weights_to_fp16)
 
     # DISTRIBUTUON STRATEGY DATA PARALLELISM
-    if t.cuda.device_count() > 1:
-        print("Let's use", t.cuda.device_count(), "GPUs!")
-        # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
-        prior = t.nn.DataParallel(prior)
+    # if t.cuda.device_count() > 1:
+    #     print("Let's use", t.cuda.device_count(), "GPUs!")
+    #     # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
+    #     prior = t.nn.DataParallel(prior)
     # ********************************
     
     prior = prior.to(device)
     restore_model(hps, prior, hps.restore_prior)
     if hps.train:
+        print("PRIOR IN TRAIN MODE")
         print_all(f"Loading prior in train mode")
         pass
     else:
+        print("PRIOR IN EVAL MODE")
         print_all(f"Loading prior in eval mode")
         prior.eval()
         freeze_model(prior)

@@ -40,11 +40,13 @@ def allgather_lists(xs):
     return [xs[i][:lengths[i]].cpu().numpy().tolist() for i in range(total_bs)]
 
 def setup_dist_from_mpi(
-    master_addr="127.0.0.1", backend="nccl", port=29500, n_attempts=5, verbose=False
+    master_addr="127.0.0.1", backend="nccl", port=29500, n_attempts=5, verbose=True
 ):
     if dist.is_available():
+        print("torch.distributed (dist) available ( distributed package is available)")
         return _setup_dist_from_mpi(master_addr, backend, port, n_attempts, verbose)
     else:
+        print("torch.distributed (dist) not available ( distributed package is NOT available)")
         use_cuda = torch.cuda.is_available()
         print(f'Using cuda {use_cuda}')
 
@@ -62,6 +64,8 @@ def _setup_dist_from_mpi(master_addr, backend, port, n_attempts, verbose):
     mpi_rank = MPI.COMM_WORLD.Get_rank()
     mpi_size = MPI.COMM_WORLD.Get_size()
 
+    print("RANK: ", mpi_rank)
+    print("WORLD SIZE: ", mpi_size)
 
     os.environ["RANK"] = str(mpi_rank)
     os.environ["WORLD_SIZE"] = str(mpi_size)
